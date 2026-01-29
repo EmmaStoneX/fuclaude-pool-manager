@@ -351,27 +351,27 @@ export default {
 
       // GET /api/auth/login: Redirect to LinuxDO OAuth
       if (url.pathname === '/api/auth/login' && request.method === 'GET') {
-        if (!env.LINUXDO_CLIENT_ID || !env.LINUXDO_REDIRECT_URI) {
-          return jsonResponse({ error: 'OAuth not configured. Please set LINUXDO_CLIENT_ID and LINUXDO_REDIRECT_URI.' }, 500);
+        if (!env.LINUXDO_CLIENT_ID || !env.LINUXDO_REDIRECT_URI || !env.FRONTEND_URL) {
+          return jsonResponse({ error: 'OAuth not configured. Please set LINUXDO_CLIENT_ID, LINUXDO_REDIRECT_URI, and FRONTEND_URL.' }, 500);
         }
         return auth.handleOAuthLogin({
           clientId: env.LINUXDO_CLIENT_ID,
           clientSecret: env.LINUXDO_CLIENT_SECRET || '',
           redirectUri: env.LINUXDO_REDIRECT_URI,
-          frontendUrl: env.FRONTEND_URL || 'https://ai.zxvmax.com',
+          frontendUrl: env.FRONTEND_URL,
         });
       }
 
       // GET /api/auth/callback/linux-do: Handle OAuth callback
       if (url.pathname === '/api/auth/callback/linux-do' && request.method === 'GET') {
-        if (!env.LINUXDO_CLIENT_ID || !env.LINUXDO_CLIENT_SECRET || !env.LINUXDO_REDIRECT_URI) {
-          return jsonResponse({ error: 'OAuth not configured' }, 500);
+        if (!env.LINUXDO_CLIENT_ID || !env.LINUXDO_CLIENT_SECRET || !env.LINUXDO_REDIRECT_URI || !env.FRONTEND_URL) {
+          return jsonResponse({ error: 'OAuth not configured. Please set LINUXDO_CLIENT_ID, LINUXDO_CLIENT_SECRET, LINUXDO_REDIRECT_URI, and FRONTEND_URL.' }, 500);
         }
         return auth.handleOAuthCallback(request, {
           clientId: env.LINUXDO_CLIENT_ID,
           clientSecret: env.LINUXDO_CLIENT_SECRET,
           redirectUri: env.LINUXDO_REDIRECT_URI,
-          frontendUrl: env.FRONTEND_URL || 'https://ai.zxvmax.com',
+          frontendUrl: env.FRONTEND_URL,
         }, env.CLAUDE_KV);
       }
 
