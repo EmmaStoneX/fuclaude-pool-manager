@@ -635,6 +635,14 @@ export default {
           return jsonResponse({ message: 'Batch processing complete.', results });
         }
 
+
+        // --- User Management Endpoints ---
+        // Handle /api/admin/users, /api/admin/users/ban, /api/admin/users/unban
+        const userManagementResponse = await userManagement.handleUserManagement(request, url, env.CLAUDE_KV);
+        if (userManagementResponse) {
+          return userManagementResponse;
+        }
+
         // If an admin path was hit but not any of the specific routes above
         return jsonResponse({ error: 'Admin endpoint not found.' }, 404);
 
