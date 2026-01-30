@@ -239,6 +239,33 @@ async function getEmailSkMap(env: Env): Promise<EmailSkMap> {
   }
 }
 
+// --- Account Status Types ---
+interface AccountStatus {
+  isValid: boolean;
+  lastChecked: number;
+  message?: string;
+}
+
+interface AccountStatusMap {
+  [email: string]: AccountStatus;
+}
+
+/**
+ * Retrieves the ACCOUNT_STATUS_MAP from KV storage.
+ */
+async function getAccountStatusMap(env: Env): Promise<AccountStatusMap> {
+  const mapStr = await env.CLAUDE_KV.get('ACCOUNT_STATUS_MAP');
+  if (!mapStr) {
+    return {};
+  }
+  try {
+    return JSON.parse(mapStr) as AccountStatusMap;
+  } catch (e) {
+    console.error("Error parsing ACCOUNT_STATUS_MAP from KV:", e);
+    return {};
+  }
+}
+
 // --- Main Worker Fetch Handler ---
 export default {
   /**
@@ -320,7 +347,15 @@ export default {
           }
         } else {
           // Default to the max allowed if not specified in request
-          expiresIn = isNaN(maxExpiresIn) ? 0 : maxExpiresIn;
+          // If maxExpiresIn is 0 (not set/unlimited), default to 8 hours (28800s) for security
+          const defaultExpiration = 28800;
+
+          if (maxExpiresIn > 0) {
+            expiresIn = maxExpiresIn;
+          } else {
+            // If env var is not set, we now default to 8 hours instead of unlimited
+            expiresIn = defaultExpiration;
+          }
         }
 
         // --- Claude API Token Exchange ---
@@ -476,12 +511,22 @@ export default {
         if (url.pathname === '/api/admin/list' && request.method === 'POST') {
           // Password check is now handled by the centralized logic above for POST requests
           const emailMap = await getEmailSkMap(env);
+          const statusMap = await getAccountStatusMap(env);
+
           const sortedEmails = sortEmails(Object.keys(emailMap));
-          const listWithIndexAndPreview = sortedEmails.map((email, index) => ({
-            index: index + 1,
-            email: email,
-            sk_preview: emailMap[email] ? `${emailMap[email].slice(0, 20)}...${emailMap[email].slice(-10)}` : "SK_INVALID_OR_MISSING" // Show a safer preview
-          }));
+          const listWithIndexAndPreview = sortedEmails.map((email, index) => {
+            const status = statusMap[email];
+            return {
+              index: index + 1,
+              email: email,
+              sk_preview: emailMap[email] ? `${emailMap[email].slice(0, 20)}...${emailMap[email].slice(-10)}` : "SK_INVALID_OR_MISSING",
+              status: status ? {
+                isValid: status.isValid,
+                lastChecked: status.lastChecked,
+                message: status.message
+              } : undefined
+            };
+          });
           return jsonResponse(listWithIndexAndPreview);
         }
 
@@ -614,6 +659,72 @@ export default {
           await env.CLAUDE_KV.put('EMAIL_TO_SK_MAP', JSON.stringify(emailMap));
           console.log(`Admin action: Account ${body.email} updated successfully. New details -> Email: ${finalEmail}, SK updated: ${!!body.new_sk}`);
           return jsonResponse({ message: `Account ${body.email} has been updated successfully.` });
+        }
+
+        // POST /api/admin/check-health: Check validity of all accounts
+        if (url.pathname === '/api/admin/check-health' && request.method === 'POST') {
+          // Password check already happened via AdminRequestBase check logic
+          const emailMap = await getEmailSkMap(env);
+          const emails = Object.keys(emailMap);
+          const statusMap: AccountStatusMap = {};
+
+          console.log(`Starting health check for ${emails.length} accounts...`);
+
+          // Concurrently check all accounts
+          const checkPromises = emails.map(async (email) => {
+            const sk = emailMap[email];
+            // Validate SK format roughly first
+            if (!sk || !sk.startsWith('sk-ant-')) {
+              statusMap[email] = { isValid: false, lastChecked: Date.now(), message: 'Invalid SK format' };
+              return;
+            }
+
+            try {
+              // We use the /api/organizations endpoint to verify the session key
+              // This is a lightweight request that requires authentication
+              const response = await fetch(`${env.BASE_URL}/api/organizations`, {
+                method: 'GET',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Cookie': `sessionKey=${sk}`
+                }
+              });
+
+              if (response.ok) {
+                statusMap[email] = { isValid: true, lastChecked: Date.now() };
+              } else {
+                console.warn(`Health check failed for ${email}: ${response.status} ${response.statusText}`);
+                // If 403 or 401, it's definitely invalid
+                statusMap[email] = {
+                  isValid: false,
+                  lastChecked: Date.now(),
+                  message: `HTTP ${response.status}`
+                };
+              }
+            } catch (error: any) {
+              console.error(`Health check error for ${email}:`, error);
+              statusMap[email] = {
+                isValid: false,
+                lastChecked: Date.now(),
+                message: error.message || 'Network Error'
+              };
+            }
+          });
+
+          await Promise.all(checkPromises);
+
+          // Update the status map in KV
+          await env.CLAUDE_KV.put('ACCOUNT_STATUS_MAP', JSON.stringify(statusMap));
+
+          return jsonResponse({
+            message: 'Health check completed.',
+            stats: {
+              total: emails.length,
+              valid: Object.values(statusMap).filter(s => s.isValid).length,
+              invalid: Object.values(statusMap).filter(s => !s.isValid).length
+            },
+            results: statusMap
+          });
         }
 
         // POST /api/admin/batch: Processes multiple add/delete operations in one request
