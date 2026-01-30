@@ -6,6 +6,8 @@
  */
 
 import * as auth from './auth';
+import * as githubAuth from './githubAuth';
+import * as userManagement from './userManagement';
 
 // --- Type Definitions ---
 
@@ -41,6 +43,11 @@ interface Env {
   LINUXDO_CLIENT_SECRET?: string;
   LINUXDO_REDIRECT_URI?: string;
   FRONTEND_URL?: string;
+
+  // GitHub OAuth Configuration
+  GITHUB_CLIENT_ID?: string;
+  GITHUB_CLIENT_SECRET?: string;
+  GITHUB_REDIRECT_URI?: string;
 }
 
 /**
@@ -383,6 +390,34 @@ export default {
       // POST /api/auth/logout: Logout
       if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
         return auth.handleLogout(request, env.CLAUDE_KV);
+      }
+
+      // --- GitHub OAuth Endpoints ---
+
+      // GET /api/auth/github/login: Redirect to GitHub OAuth
+      if (url.pathname === '/api/auth/github/login' && request.method === 'GET') {
+        if (!env.GITHUB_CLIENT_ID || !env.GITHUB_REDIRECT_URI || !env.FRONTEND_URL) {
+          return jsonResponse({ error: 'GitHub OAuth not configured. Please set GITHUB_CLIENT_ID, GITHUB_REDIRECT_URI, and FRONTEND_URL.' }, 500);
+        }
+        return githubAuth.handleGitHubOAuthLogin({
+          clientId: env.GITHUB_CLIENT_ID,
+          clientSecret: env.GITHUB_CLIENT_SECRET || '',
+          redirectUri: env.GITHUB_REDIRECT_URI,
+          frontendUrl: env.FRONTEND_URL,
+        });
+      }
+
+      // GET /api/auth/callback/github: Handle GitHub OAuth callback
+      if (url.pathname === '/api/auth/callback/github' && request.method === 'GET') {
+        if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET || !env.GITHUB_REDIRECT_URI || !env.FRONTEND_URL) {
+          return jsonResponse({ error: 'GitHub OAuth not configured. Please set GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_REDIRECT_URI, and FRONTEND_URL.' }, 500);
+        }
+        return githubAuth.handleGitHubOAuthCallback(request, {
+          clientId: env.GITHUB_CLIENT_ID,
+          clientSecret: env.GITHUB_CLIENT_SECRET,
+          redirectUri: env.GITHUB_REDIRECT_URI,
+          frontendUrl: env.FRONTEND_URL,
+        }, env.CLAUDE_KV);
       }
 
       // --- Admin Endpoints (prefixed with /api/admin) ---
