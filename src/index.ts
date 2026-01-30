@@ -354,6 +354,43 @@ export default {
         return jsonResponse(responsePayload);
       }
 
+      // POST /api/contribute: Public endpoint for users to contribute their SK to the pool
+      if (url.pathname === '/api/contribute' && request.method === 'POST') {
+        const body = await request.json().catch(() => ({})) as { email?: string; sk?: string };
+
+        if (!body.email || !body.sk) {
+          return jsonResponse({ error: 'Email and SK are required.' }, 400);
+        }
+
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(body.email)) {
+          return jsonResponse({ error: 'Invalid email format.' }, 400);
+        }
+
+        // Validate SK format (should start with 'sk-ant-')
+        if (!body.sk.startsWith('sk-ant-')) {
+          return jsonResponse({ error: 'Invalid SK format. SK should start with "sk-ant-".' }, 400);
+        }
+
+        // Get current email map
+        const emailMap = await getEmailSkMap(env);
+
+        // Check if email already exists
+        if (emailMap[body.email]) {
+          return jsonResponse({ error: 'This email already exists in the pool.' }, 409);
+        }
+
+        // Add the new email-SK pair
+        emailMap[body.email] = body.sk;
+
+        // Save back to KV
+        await env.CLAUDE_KV.put('EMAIL_TO_SK_MAP', JSON.stringify(emailMap));
+
+        console.log(`Contribution: Account ${body.email} added to pool.`);
+        return jsonResponse({ message: 'Thank you! Your account has been added to the pool.', email: body.email });
+      }
+
       // --- LinuxDO OAuth Endpoints ---
 
       // GET /api/auth/login: Redirect to LinuxDO OAuth
