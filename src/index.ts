@@ -680,21 +680,27 @@ export default {
             }
 
             try {
-              // We use the /api/organizations endpoint to verify the session key
-              // This is a lightweight request that requires authentication
-              const response = await fetch(`${env.BASE_URL}/api/organizations`, {
-                method: 'GET',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Cookie': `sessionKey=${sk}`
-                }
+              // Use the token exchange endpoint (same as login) to verify validity.
+              // This is the most reliable method as it tests the actual login capability.
+              const uniqueName = `check_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+              // Use a short expiration for the check
+              const oauthPayload = { session_key: sk, unique_name: uniqueName, expires_in: 60 };
+
+              const response = await fetch(`${env.BASE_URL}/manage-api/auth/oauth_token`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(oauthPayload),
               });
 
               if (response.ok) {
-                statusMap[email] = { isValid: true, lastChecked: Date.now() };
+                const data: any = await response.json();
+                if (data && data.login_url) {
+                  statusMap[email] = { isValid: true, lastChecked: Date.now() };
+                } else {
+                  statusMap[email] = { isValid: false, lastChecked: Date.now(), message: 'No login_url response' };
+                }
               } else {
-                console.warn(`Health check failed for ${email}: ${response.status} ${response.statusText}`);
-                // If 403 or 401, it's definitely invalid
+                console.warn(`Health check failed for ${email}: ${response.status}`);
                 statusMap[email] = {
                   isValid: false,
                   lastChecked: Date.now(),
