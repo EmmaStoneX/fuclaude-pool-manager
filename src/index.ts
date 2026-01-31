@@ -8,6 +8,7 @@
 import * as auth from './auth';
 import * as githubAuth from './githubAuth';
 import * as userManagement from './userManagement';
+import * as rateLimiter from './rateLimiter';
 
 // --- Type Definitions ---
 
@@ -494,6 +495,19 @@ export default {
 
       // --- Admin Endpoints (prefixed with /api/admin) ---
       if (url.pathname.startsWith('/api/admin')) {
+        const clientIP = rateLimiter.getClientIP(request);
+
+        // Check if IP is banned before processing any admin request
+        const banStatus = await rateLimiter.checkIPBanned(clientIP, env.CLAUDE_KV);
+        if (banStatus.banned) {
+          console.warn(`[SECURITY] Blocked request from banned IP: ${clientIP}. Remaining ban time: ${banStatus.remainingSeconds}s`);
+          return jsonResponse({
+            error: `您的 IP 已被临时封禁，请在 ${Math.ceil(banStatus.remainingSeconds / 60)} 分钟后重试。`,
+            error_code: 'IP_BANNED',
+            remaining_seconds: banStatus.remainingSeconds,
+          }, 403);
+        }
+
         // Centralized admin password extraction and validation for POST, PUT, DELETE
         if (request.method === 'POST' || request.method === 'PUT' || request.method === 'DELETE') {
           let adminRequestData: AdminRequestBase;
@@ -502,9 +516,29 @@ export default {
           } catch (e) {
             return jsonResponse({ error: 'Invalid JSON body for admin request.' }, 400);
           }
+
+          // Check password
           if (adminRequestData.admin_password !== env.ADMIN_PASSWORD) {
-            return jsonResponse({ error: 'Unauthorized. Invalid admin password.' }, 401);
+            // Record failed attempt
+            const result = await rateLimiter.recordFailedAttempt(clientIP, env.CLAUDE_KV);
+
+            if (result.nowBanned) {
+              return jsonResponse({
+                error: `密码错误次数过多，您的 IP 已被封禁 ${Math.ceil(result.banDuration! / 60)} 分钟。`,
+                error_code: 'IP_BANNED',
+                ban_duration: result.banDuration,
+              }, 403);
+            }
+
+            return jsonResponse({
+              error: `密码错误。剩余尝试次数: ${result.attemptsRemaining}`,
+              error_code: 'INVALID_PASSWORD',
+              attempts_remaining: result.attemptsRemaining,
+            }, 401);
           }
+
+          // Password correct - clear failed attempt record
+          await rateLimiter.recordSuccessfulLogin(clientIP, env.CLAUDE_KV);
         }
 
         // POST /api/admin/list: Lists all email-SK pairs (requires admin password in body)
@@ -790,12 +824,36 @@ export default {
         }
 
 
+
+        // POST /api/admin/banned-ips: Get list of currently banned IPs
+        if (url.pathname === '/api/admin/banned-ips' && request.method === 'POST') {
+          const bannedIPs = await rateLimiter.getBannedIPs(env.CLAUDE_KV);
+          const now = Date.now();
+
+          return jsonResponse({
+            message: 'Banned IPs retrieved successfully.',
+            count: bannedIPs.length,
+            banned_ips: bannedIPs.map(item => ({
+              ip: item.ip,
+              failed_attempts: item.failedAttempts,
+              banned_until: new Date(item.bannedUntil).toISOString(),
+              remaining_seconds: Math.ceil((item.bannedUntil - now) / 1000),
+            })),
+            config: {
+              max_failed_attempts: rateLimiter.RATE_LIMIT_CONFIG.MAX_FAILED_ATTEMPTS,
+              ban_duration_seconds: rateLimiter.RATE_LIMIT_CONFIG.BAN_DURATION_SECONDS,
+            }
+          });
+        }
+
+
         // --- User Management Endpoints ---
         // Handle /api/admin/users, /api/admin/users/ban, /api/admin/users/unban
         const userManagementResponse = await userManagement.handleUserManagement(request, url, env.CLAUDE_KV);
         if (userManagementResponse) {
           return userManagementResponse;
         }
+
 
         // If an admin path was hit but not any of the specific routes above
         return jsonResponse({ error: 'Admin endpoint not found.' }, 404);
