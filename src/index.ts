@@ -50,6 +50,10 @@ interface Env {
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;
   GITHUB_REDIRECT_URI?: string;
+
+  // Admin whitelist (comma-separated usernames)
+  ADMIN_WHITELIST_LINUXDO?: string;
+  ADMIN_WHITELIST_GITHUB?: string;
 }
 
 /**
@@ -167,6 +171,23 @@ interface AdminBatchRequest extends AdminRequestBase {
 // --- Helper Functions ---
 
 /**
+ * Allowed origins for CORS (restrict to known frontend domains)
+ */
+const ALLOWED_ORIGINS = [
+  'https://ai.zxvmax.com',
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
+
+/**
+ * Validates if an origin is allowed for CORS
+ */
+const isAllowedOrigin = (origin: string | null): boolean => {
+  if (!origin) return false;
+  return ALLOWED_ORIGINS.some(allowed => origin === allowed || origin.endsWith('.vercel.app'));
+};
+
+/**
  * Creates a JSON response with appropriate CORS headers.
  * @param data The data to be stringified into the response body.
  * @param status The HTTP status code for the response (default is 200).
@@ -175,16 +196,16 @@ interface AdminBatchRequest extends AdminRequestBase {
  * @returns A Response object.
  */
 const jsonResponse = (data: any, status = 200, extraHeaders = {}, origin?: string) => {
+  // Only allow specific origins, not wildcard
+  const allowedOrigin = origin && isAllowedOrigin(origin) ? origin : ALLOWED_ORIGINS[0];
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': origin || '*',
+    'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Credentials': 'true',
     ...extraHeaders,
   };
-  if (origin) {
-    headers['Access-Control-Allow-Credentials'] = 'true';
-  }
   return new Response(JSON.stringify(data, null, 2), { status, headers });
 };
 
@@ -194,15 +215,14 @@ const jsonResponse = (data: any, status = 200, extraHeaders = {}, origin?: strin
  * @returns A Response object with appropriate CORS headers for preflight.
  */
 const handleOptions = (request: Request) => {
-  const origin = request.headers.get('Origin') || '*';
+  const origin = request.headers.get('Origin');
+  const allowedOrigin = origin && isAllowedOrigin(origin) ? origin : ALLOWED_ORIGINS[0];
   const headers: Record<string, string> = {
-    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Credentials': 'true',
   };
-  if (origin !== '*') {
-    headers['Access-Control-Allow-Credentials'] = 'true';
-  }
   return new Response(null, { headers });
 };
 
@@ -357,7 +377,8 @@ export default {
           }
           selectedEmailForLog = emails[Math.floor(Math.random() * emails.length)];
           sk = emailMap[selectedEmailForLog];
-          uniqueName = `rand_${Date.now().toString(36)}${Math.random().toString(36).substring(2, 7)}`; // More unique random name
+          // Use crypto.randomUUID() for more secure random name generation
+          uniqueName = `rand_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
         } else if (body.mode === 'specific') {
           if (!body.email || !body.unique_name) {
             return jsonResponse({ error: 'Email and unique_name are required for specific mode' }, 400);
@@ -517,6 +538,7 @@ export default {
           clientSecret: env.LINUXDO_CLIENT_SECRET,
           redirectUri: env.LINUXDO_REDIRECT_URI,
           frontendUrl: env.FRONTEND_URL,
+          adminWhitelist: env.ADMIN_WHITELIST_LINUXDO?.split(',').map(s => s.trim()) || ['Triceratops2017'],
         }, env.CLAUDE_KV);
       }
 
@@ -555,6 +577,7 @@ export default {
           clientSecret: env.GITHUB_CLIENT_SECRET,
           redirectUri: env.GITHUB_REDIRECT_URI,
           frontendUrl: env.FRONTEND_URL,
+          adminWhitelist: env.ADMIN_WHITELIST_GITHUB?.split(',').map(s => s.trim()) || ['EmmaStoneX'],
         }, env.CLAUDE_KV);
       }
 
@@ -644,7 +667,7 @@ export default {
             }
             selectedEmailForLog = emails[Math.floor(Math.random() * emails.length)];
             sk = emailMap[selectedEmailForLog];
-            uniqueName = `rand_${Date.now().toString(36)}${Math.random().toString(36).substring(2, 7)}`;
+            uniqueName = `rand_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
           } else if (body.mode === 'specific') {
             if (!body.email || !body.unique_name) {
               return jsonResponse({ error: 'Email and unique_name are required for specific mode' }, 400);

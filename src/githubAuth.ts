@@ -9,6 +9,7 @@ interface GitHubOAuthConfig {
     clientSecret: string;
     redirectUri: string;
     frontendUrl: string;
+    adminWhitelist?: string[]; // Admin usernames allowed during maintenance
 }
 
 /**
@@ -157,9 +158,9 @@ export async function handleGitHubOAuthCallback(
         const settings = settingsStr ? JSON.parse(settingsStr) : { login_github_enabled: true };
 
         if (settings.login_github_enabled === false) {
-            // Allow admin whitelist bypass
-            const ALLOWED_ADMINS = ['EmmaStoneX'];
-            if (!ALLOWED_ADMINS.includes(userData.login)) {
+            // Allow admin whitelist bypass (from config or default)
+            const allowedAdmins = config.adminWhitelist || ['EmmaStoneX'];
+            if (!allowedAdmins.includes(userData.login)) {
                 return Response.redirect(`${config.frontendUrl}?error=maintenance_mode`, 302);
             }
         }

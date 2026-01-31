@@ -9,6 +9,7 @@ interface OAuthConfig {
     clientSecret: string;
     redirectUri: string;
     frontendUrl: string;
+    adminWhitelist?: string[]; // Admin usernames allowed during maintenance
 }
 
 /**
@@ -146,9 +147,9 @@ export async function handleOAuthCallback(
         const settings = settingsStr ? JSON.parse(settingsStr) : { login_linuxdo_enabled: true };
 
         if (settings.login_linuxdo_enabled === false) {
-            // Allow admin whitelist bypass
-            const ALLOWED_ADMINS = ['Triceratops2017'];
-            if (!ALLOWED_ADMINS.includes(userData.username)) {
+            // Allow admin whitelist bypass (from config or default)
+            const allowedAdmins = config.adminWhitelist || ['Triceratops2017'];
+            if (!allowedAdmins.includes(userData.username)) {
                 return Response.redirect(`${config.frontendUrl}?error=maintenance_mode`, 302);
             }
         }
@@ -244,7 +245,12 @@ export async function getCurrentUser(
 
     // Check System Maintenance Settings
     const settingsStr = await kv.get('SYSTEM_SETTINGS');
-    const settings = settingsStr ? JSON.parse(settingsStr) : { login_linuxdo_enabled: true, login_github_enabled: true };
+    const settings = settingsStr ? JSON.parse(settingsStr) : { 
+        login_linuxdo_enabled: true, 
+        login_github_enabled: true,
+        admin_whitelist_linuxdo: ['Triceratops2017'],
+        admin_whitelist_github: ['EmmaStoneX']
+    };
 
     // Determine provider (default to 'linuxdo' if missing)
     // Note: sessionData type in this file might need update to include auth_provider, but at runtime it handles it if present
@@ -252,8 +258,8 @@ export async function getCurrentUser(
 
     if (provider === 'github') {
         if (settings.login_github_enabled === false) {
-            const ALLOWED_ADMINS = ['EmmaStoneX'];
-            if (!ALLOWED_ADMINS.includes(sessionData.username)) {
+            const allowedAdmins = settings.admin_whitelist_github || ['EmmaStoneX'];
+            if (!allowedAdmins.includes(sessionData.username)) {
                 // Maintenance mode active, user not whitelisted -> invalid session
                 return new Response(JSON.stringify({ user: null, error: 'maintenance_mode' }), { status: 200, headers });
             }
@@ -261,8 +267,8 @@ export async function getCurrentUser(
     } else {
         // LinuxDO
         if (settings.login_linuxdo_enabled === false) {
-            const ALLOWED_ADMINS = ['Triceratops2017'];
-            if (!ALLOWED_ADMINS.includes(sessionData.username)) {
+            const allowedAdmins = settings.admin_whitelist_linuxdo || ['Triceratops2017'];
+            if (!allowedAdmins.includes(sessionData.username)) {
                 return new Response(JSON.stringify({ user: null, error: 'maintenance_mode' }), { status: 200, headers });
             }
         }

@@ -55,7 +55,10 @@
 		"FRONTEND_URL": "https://ai.zxvmax.com",
 		// GitHub OAuth Configuration
 		"GITHUB_CLIENT_ID": "Ov23lilddOVCTMYezKkq",
-		"GITHUB_REDIRECT_URI": "https://backend-ai.zxvmax.com/api/auth/callback/github"
+		"GITHUB_REDIRECT_URI": "https://backend-ai.zxvmax.com/api/auth/callback/github",
+		// Admin whitelist (comma-separated usernames for maintenance mode bypass)
+		"ADMIN_WHITELIST_LINUXDO": "Triceratops2017",
+		"ADMIN_WHITELIST_GITHUB": "EmmaStoneX"
 	}
 	/**
 	 * Static Assets
