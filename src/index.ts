@@ -9,6 +9,7 @@ import * as auth from './auth';
 import * as githubAuth from './githubAuth';
 import * as userManagement from './userManagement';
 import * as rateLimiter from './rateLimiter';
+import * as accountStatus from './accountStatus';
 
 // --- Type Definitions ---
 
@@ -288,11 +289,18 @@ export default {
 
       // --- User Endpoints ---
 
-      // GET /api/emails: Lists available email addresses (sorted)
+      // GET /api/emails: Lists available email addresses with status (sorted)
       if (url.pathname === '/api/emails' && request.method === 'GET') {
         const emailMap = await getEmailSkMap(env);
         const sortedEmails = sortEmails(Object.keys(emailMap));
-        return jsonResponse({ emails: sortedEmails });
+
+        // Get enriched account list with status information
+        const enrichedList = await accountStatus.getEnrichedAccountList(sortedEmails, env.CLAUDE_KV);
+
+        return jsonResponse({
+          emails: sortedEmails,
+          accounts: enrichedList
+        });
       }
 
       // POST /api/login: Handles user login requests (specific or random)
@@ -387,7 +395,14 @@ export default {
         if (warning) {
           responsePayload.warning = warning;
         }
+
+        // Record login event for status tracking
+        if (selectedEmailForLog) {
+          await accountStatus.recordLogin(selectedEmailForLog, env.CLAUDE_KV);
+        }
+
         return jsonResponse(responsePayload);
+
       }
 
       // POST /api/contribute: Public endpoint for users to contribute their SK to the pool
@@ -395,18 +410,18 @@ export default {
         const body = await request.json().catch(() => ({})) as { email?: string; sk?: string };
 
         if (!body.email || !body.sk) {
-          return jsonResponse({ error: 'Email and SK are required.' }, 400);
+          return jsonResponse({ error: '请填写邮箱和 Session Key。' }, 400);
         }
 
         // Validate email format
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(body.email)) {
-          return jsonResponse({ error: 'Invalid email format.' }, 400);
+          return jsonResponse({ error: '邮箱格式不正确，请检查输入。' }, 400);
         }
 
         // Validate SK format (should start with 'sk-ant-')
         if (!body.sk.startsWith('sk-ant-')) {
-          return jsonResponse({ error: 'Invalid SK format. SK should start with "sk-ant-".' }, 400);
+          return jsonResponse({ error: 'Session Key 格式不正确，应以 "sk-ant-" 开头。' }, 400);
         }
 
         // Get current email map
@@ -414,18 +429,35 @@ export default {
 
         // Check if email already exists
         if (emailMap[body.email]) {
-          return jsonResponse({ error: 'This email already exists in the pool.' }, 409);
+          return jsonResponse({ error: '该邮箱已存在于账号池中。' }, 409);
         }
 
-        // Add the new email-SK pair
-        emailMap[body.email] = body.sk;
+        // **Verify account health before adding (测活)**
+        console.log(`Contribution: Verifying account ${body.email}...`);
+        const healthCheck = await accountStatus.verifyAccountHealth(body.email, body.sk, env.BASE_URL);
 
-        // Save back to KV
+        if (!healthCheck.isValid) {
+          console.warn(`Contribution rejected: Account ${body.email} failed health check - ${healthCheck.message}`);
+          return jsonResponse({
+            error: `账号验证失败，请检查邮箱和 Session Key 是否正确。错误信息: ${healthCheck.message || '无法连接'}`,
+            error_code: 'HEALTH_CHECK_FAILED'
+          }, 400);
+        }
+
+        // Health check passed, add the account
+        emailMap[body.email] = body.sk;
         await env.CLAUDE_KV.put('EMAIL_TO_SK_MAP', JSON.stringify(emailMap));
 
-        console.log(`Contribution: Account ${body.email} added to pool.`);
-        return jsonResponse({ message: 'Thank you! Your account has been added to the pool.', email: body.email });
+        // Mark as contributed account with valid status
+        await accountStatus.initAccountMetadata(body.email, env.CLAUDE_KV, true, true);
+
+        console.log(`Contribution: Account ${body.email} added to pool (verified ✓).`);
+        return jsonResponse({
+          message: '感谢您的投喂！账号验证通过，已成功添加到账号池。',
+          email: body.email
+        });
       }
+
 
       // --- LinuxDO OAuth Endpoints ---
 
