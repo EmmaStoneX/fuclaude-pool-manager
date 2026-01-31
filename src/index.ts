@@ -746,33 +746,19 @@ export default {
             }
 
             try {
-              // Use the token exchange endpoint (same as login) to verify validity.
-              // This is the most reliable method as it tests the actual login capability.
-              const uniqueName = `check_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-              // Use a short expiration for the check
-              const oauthPayload = { session_key: sk, unique_name: uniqueName, expires_in: 60 };
+              // Use standard verification logic
+              const result = await accountStatus.verifyAccountHealth(email, sk, env.BASE_URL);
 
-              const response = await fetch(`${env.BASE_URL}/manage-api/auth/oauth_token`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(oauthPayload),
-              });
+              statusMap[email] = {
+                isValid: result.isValid,
+                lastChecked: Date.now(),
+                message: result.message
+              };
 
-              if (response.ok) {
-                const data: any = await response.json();
-                if (data && data.login_url) {
-                  statusMap[email] = { isValid: true, lastChecked: Date.now() };
-                } else {
-                  statusMap[email] = { isValid: false, lastChecked: Date.now(), message: 'No login_url response' };
-                }
-              } else {
-                console.warn(`Health check failed for ${email}: ${response.status}`);
-                statusMap[email] = {
-                  isValid: false,
-                  lastChecked: Date.now(),
-                  message: `HTTP ${response.status}`
-                };
+              if (!result.isValid) {
+                console.warn(`Health check failed for ${email}: ${result.message}`);
               }
+
             } catch (error: any) {
               console.error(`Health check error for ${email}:`, error);
               statusMap[email] = {
