@@ -30,10 +30,10 @@ export type AccountStatusType = 'available' | 'busy' | 'unavailable';
  * Thresholds for status determination
  */
 export const STATUS_THRESHOLDS = {
-    /** Max sessions before considered "busy" */
-    BUSY_THRESHOLD: 1,
-    /** Max sessions before considered "unavailable" (overloaded) */
-    OVERLOAD_THRESHOLD: 3,
+    /** Max sessions before considered "busy" (starts at yellow) */
+    BUSY_THRESHOLD: 10,
+    /** Max sessions before considered "overloaded" (still yellow/busy, but high usage) */
+    OVERLOAD_THRESHOLD: 20,
 };
 
 /**
@@ -104,11 +104,10 @@ export async function recordLogin(email: string, kv: KVNamespace): Promise<void>
  */
 export function getAccountStatus(activeSessions: number, isValid: boolean): AccountStatusType {
     if (!isValid) {
-        return 'unavailable';
+        return 'unavailable'; // Red: Failed health check
     }
-    if (activeSessions >= STATUS_THRESHOLDS.OVERLOAD_THRESHOLD) {
-        return 'unavailable';
-    }
+    // Even if overloaded, as long as it's valid, we show it as busy (Yellow) or maybe a different shade, 
+    // but user specified: 1-10 Green, >10 Busy. Red is for invalid.
     if (activeSessions >= STATUS_THRESHOLDS.BUSY_THRESHOLD) {
         return 'busy';
     }
@@ -207,6 +206,19 @@ export async function verifyAccountHealth(
 /**
  * Get enriched account list with status information
  */
+/**
+ * Helper to get account status map (health check results)
+ */
+async function getHealthCheckStatusMap(kv: KVNamespace): Promise<Record<string, { isValid: boolean, message?: string }>> {
+    const mapStr = await kv.get('ACCOUNT_STATUS_MAP');
+    if (!mapStr) return {};
+    try {
+        return JSON.parse(mapStr) as Record<string, { isValid: boolean, message?: string }>;
+    } catch {
+        return {};
+    }
+}
+
 export async function getEnrichedAccountList(
     emails: string[],
     kv: KVNamespace
@@ -218,11 +230,23 @@ export async function getEnrichedAccountList(
 }>> {
     const metadataMap = await getAccountMetadataMap(kv);
     const sessionsMap = await getActiveSessionsMap(kv);
+    const healthStatusMap = await getHealthCheckStatusMap(kv);
 
     return emails.map(email => {
         const metadata = metadataMap[email];
         const activeSessions = sessionsMap[email] || 0;
-        const isValid = metadata?.isValid ?? true;
+
+        // Priority for validity:
+        // 1. Health Check Map (most recent admin check)
+        // 2. Metadata (stored state)
+        // 3. Default true
+        let isValid = true;
+
+        if (healthStatusMap[email]) {
+            isValid = healthStatusMap[email].isValid;
+        } else if (metadata) {
+            isValid = metadata.isValid;
+        }
 
         return {
             email,
