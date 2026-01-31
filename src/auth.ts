@@ -238,11 +238,38 @@ export async function getCurrentUser(
         return new Response(JSON.stringify({ user: null }), { status: 200, headers });
     }
 
+    // Check System Maintenance Settings
+    const settingsStr = await kv.get('SYSTEM_SETTINGS');
+    const settings = settingsStr ? JSON.parse(settingsStr) : { login_linuxdo_enabled: true, login_github_enabled: true };
+
+    // Determine provider (default to 'linuxdo' if missing)
+    // Note: sessionData type in this file might need update to include auth_provider, but at runtime it handles it if present
+    const provider = (sessionData as any).auth_provider || 'linuxdo';
+
+    if (provider === 'github') {
+        if (settings.login_github_enabled === false) {
+            const ALLOWED_ADMINS = ['EmmaStoneX'];
+            if (!ALLOWED_ADMINS.includes(sessionData.username)) {
+                // Maintenance mode active, user not whitelisted -> invalid session
+                return new Response(JSON.stringify({ user: null, error: 'maintenance_mode' }), { status: 200, headers });
+            }
+        }
+    } else {
+        // LinuxDO
+        if (settings.login_linuxdo_enabled === false) {
+            const ALLOWED_ADMINS = ['Triceratops2017'];
+            if (!ALLOWED_ADMINS.includes(sessionData.username)) {
+                return new Response(JSON.stringify({ user: null, error: 'maintenance_mode' }), { status: 200, headers });
+            }
+        }
+    }
+
     return new Response(JSON.stringify({
         user: {
             id: sessionData.user_id,
             username: sessionData.username,
             avatar_url: sessionData.avatar_url,
+            auth_provider: provider
         }
     }), { status: 200, headers });
 }
