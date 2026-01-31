@@ -20,6 +20,7 @@ interface LinuxDoUser {
     name?: string;
     avatar_template?: string;
     trust_level?: number;
+    email?: string;
 }
 
 /**
@@ -41,6 +42,7 @@ interface StoredUser {
     username: string;
     name?: string;
     avatar_url?: string;
+    email?: string;
     trust_level?: number;
     first_login: string;
     last_login: string;
@@ -57,6 +59,7 @@ export function handleOAuthLogin(config: OAuthConfig): Response {
     authUrl.searchParams.set('response_type', 'code');
     authUrl.searchParams.set('redirect_uri', config.redirectUri);
     authUrl.searchParams.set('state', state);
+    authUrl.searchParams.set('scope', 'read email'); // Try to request email scope
 
     const headers = new Headers({
         'Location': authUrl.toString(),
@@ -164,6 +167,7 @@ export async function handleOAuthCallback(
             username: userData.username,
             name: userData.name,
             avatar_url: avatarUrl,
+            email: userData.email,
             trust_level: userData.trust_level,
             first_login: existingUser?.first_login || now,
             last_login: now,

@@ -49,6 +49,7 @@ export async function handleUserManagement(
             name: user.name,
             avatar_url: user.avatar_url,
             trust_level: user.trust_level,
+            email: user.email,
             first_login: user.first_login,
             last_login: user.last_login,
             login_count: user.login_count,
