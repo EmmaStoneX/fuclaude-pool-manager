@@ -180,30 +180,10 @@ export async function verifyAccountHealth(
     baseUrl: string
 ): Promise<{ isValid: boolean; message?: string }> {
     try {
-        // Method 1: Try direct API access (Most accurate)
-        // We try to access the organizations endpoint which requires valid authentication
-        const response = await fetch(`${baseUrl}/api/organizations`, {
-            method: 'GET',
-            headers: {
-                'Cookie': `sessionKey=${sk}`,
-                'Content-Type': 'application/json'
-            },
-        });
-
-        if (response.ok) {
-            return { isValid: true };
-        }
-
-        // If direct API fails, it might be due to 401/403 (Invalid SK) or other issues
-        if (response.status === 401 || response.status === 403) {
-            return { isValid: false, message: `Session Key无效或已过期 (HTTP ${response.status})` };
-        }
-
-        // Method 2: Fallback to OAuth token exchange if API method fails with other errors (e.g. 404, 500)
-        // This is a backup in case /api/organizations is not proxied or available
-        console.warn(`Direct API check failed for ${email} (${response.status}), falling back to OAuth check.`);
-
+        // We use the OAuth token exchange endpoint to verify validity.
+        // This mimics the actual user login flow, which is the most reliable way to check if an SK works.
         const uniqueName = `health_check_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        // Use a 60s expiration to minimize resource usage
         const oauthPayload = { session_key: sk, unique_name: uniqueName, expires_in: 60 };
 
         const oauthResponse = await fetch(`${baseUrl}/manage-api/auth/oauth_token`, {
@@ -215,14 +195,16 @@ export async function verifyAccountHealth(
         if (oauthResponse.ok) {
             const data: any = await oauthResponse.json();
             if (data && data.login_url) {
-                // Warning: This might still give a false positive if FuClaude returns a URL for invalid SKs
-                // But it's better than nothing if Method 1 blocked by network/proxy config
                 return { isValid: true };
             }
             return { isValid: false, message: 'OAuth response missing login_url' };
         }
 
-        return { isValid: false, message: `All checks failed. API: ${response.status}, OAuth: ${oauthResponse.status}` };
+        if (oauthResponse.status === 401 || oauthResponse.status === 403) {
+            return { isValid: false, message: `Session Key无效或已过期 (HTTP ${oauthResponse.status})` };
+        }
+
+        return { isValid: false, message: `Check failed: HTTP ${oauthResponse.status}` };
 
     } catch (error: any) {
         return { isValid: false, message: error.message || 'Network error during health check' };
