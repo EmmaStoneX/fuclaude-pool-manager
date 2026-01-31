@@ -241,6 +241,39 @@ async function getEmailSkMap(env: Env): Promise<EmailSkMap> {
   }
 }
 
+/**
+ * Interface for system settings
+ */
+export interface SystemSettings {
+  login_linuxdo_enabled: boolean;
+  login_github_enabled: boolean;
+}
+
+/**
+ * Helper to get system settings from KV.
+ * Returns default settings if not found.
+ */
+export async function getSystemSettings(kv: KVNamespace): Promise<SystemSettings> {
+  const settingsStr = await kv.get('SYSTEM_SETTINGS');
+  if (!settingsStr) {
+    // Default settings: all enabled
+    return {
+      login_linuxdo_enabled: true,
+      login_github_enabled: true,
+    };
+  }
+  try {
+    return JSON.parse(settingsStr) as SystemSettings;
+  } catch (e) {
+    console.error('Failed to parse SYSTEM_SETTINGS from KV:', e);
+    return {
+      login_linuxdo_enabled: true,
+      login_github_enabled: true,
+    };
+  }
+}
+
+
 // --- Account Status Types ---
 interface AccountStatus {
   isValid: boolean;
@@ -840,6 +873,24 @@ export default {
 
           return jsonResponse({ message: 'Batch processing complete.', results });
         }
+
+        // POST /api/admin/settings: Get or update system settings
+        if (url.pathname === '/api/admin/settings' && request.method === 'POST') {
+          // Password check already performed
+          const body = await request.json().catch(() => ({})) as { settings?: any };
+
+          let settings = await getSystemSettings(env.CLAUDE_KV);
+
+          if (body.settings) {
+            // Update settings
+            settings = { ...settings, ...body.settings };
+            await env.CLAUDE_KV.put('SYSTEM_SETTINGS', JSON.stringify(settings));
+            console.log('Admin action: System settings updated.');
+          }
+
+          return jsonResponse({ settings });
+        }
+
 
 
 

@@ -152,6 +152,19 @@ export async function handleGitHubOAuthCallback(
             return Response.redirect(`${config.frontendUrl}?error=user_banned`, 302);
         }
 
+        // Check if GitHub login is enabled (System Maintenance)
+        const settingsStr = await kv.get('SYSTEM_SETTINGS');
+        const settings = settingsStr ? JSON.parse(settingsStr) : { login_github_enabled: true };
+
+        if (settings.login_github_enabled === false) {
+            // Allow admin whitelist bypass
+            const ALLOWED_ADMINS = ['EmmaStoneX'];
+            if (!ALLOWED_ADMINS.includes(userData.login)) {
+                return Response.redirect(`${config.frontendUrl}?error=maintenance_mode`, 302);
+            }
+        }
+
+
         // Store/update user info
         const usersStr = await kv.get('GITHUB_USERS');
         const users: Record<string, StoredGitHubUser> = usersStr ? JSON.parse(usersStr) : {};

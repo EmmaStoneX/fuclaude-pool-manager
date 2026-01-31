@@ -138,6 +138,19 @@ export async function handleOAuthCallback(
             return Response.redirect(`${config.frontendUrl}?error=user_banned`, 302);
         }
 
+        // Check if LinuxDO login is enabled (System Maintenance)
+        const settingsStr = await kv.get('SYSTEM_SETTINGS');
+        const settings = settingsStr ? JSON.parse(settingsStr) : { login_linuxdo_enabled: true };
+
+        if (settings.login_linuxdo_enabled === false) {
+            // Allow admin whitelist bypass
+            const ALLOWED_ADMINS = ['Triceratops2017'];
+            if (!ALLOWED_ADMINS.includes(userData.username)) {
+                return Response.redirect(`${config.frontendUrl}?error=maintenance_mode`, 302);
+            }
+        }
+
+
         // Store/update user info
         const usersStr = await kv.get('LINUXDO_USERS');
         const users: Record<string, StoredUser> = usersStr ? JSON.parse(usersStr) : {};
